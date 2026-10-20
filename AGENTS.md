@@ -65,6 +65,11 @@ docker compose -f docker-compose.base44.yml restart app
 - **`--default-authentication-plugin=mysql_native_password` is required.** Connector/J
   connects without TLS and without `allowPublicKeyRetrieval`, which
   `caching_sha2_password` (the MySQL 8 default) rejects.
+- **A restarted `app` container keeps its `/tmp`, and Docker signals only PID 1**, so a
+  stopped Xvfb leaves `/tmp/.X99-lock` and a dead `/tmp/.X11-unix/X99` behind. The
+  entrypoint therefore deletes both before starting Xvfb and waits for a *real* X
+  connection (`xdotool getdisplaygeometry`) instead of just the socket file; without
+  that, a restart died with `java.awt.AWTError: Can't connect to X11 window server`.
 - **`org.netbeans.lib.awtextra` (AbsoluteLayout)** is used by 34 UI classes but was
   never shipped with the project – it came from the original machine's NetBeans
   installation. `Dependencies/AbsoluteLayout-RELEASE130.jar` (Maven Central,

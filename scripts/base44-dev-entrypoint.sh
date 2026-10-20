@@ -40,17 +40,28 @@ javac -nowarn -encoding UTF-8 -d "$CLASSES_DIR" -cp "$JARS" @/tmp/base44-sources
 log "compile finished"
 
 # --- 3. Virtual X display.
+# A restart reuses this container's filesystem and Docker signals only PID 1, so a
+# killed Xvfb leaves /tmp/.X99-lock and a dead /tmp/.X11-unix/X99 behind. Xvfb then
+# refuses to start, the old socket check still passes, and the app dies with
+# "Can't connect to X11 window server". Clear them, then wait for a real X
+# connection instead of just the socket file.
 log "starting Xvfb on ${DISPLAY} (${SCREEN_GEOMETRY})"
+rm -f "/tmp/.X11-unix/X${DISPLAY#:}" "/tmp/.X${DISPLAY#:}-lock"
 Xvfb "$DISPLAY" -screen 0 "$SCREEN_GEOMETRY" -nolisten tcp >/tmp/xvfb.log 2>&1 &
-for _ in $(seq 1 50); do
-    [ -S "/tmp/.X11-unix/X${DISPLAY#:}" ] && break
+xvfb_up=""
+for _ in $(seq 1 100); do
+    if xdotool getdisplaygeometry >/dev/null 2>&1; then
+        xvfb_up=1
+        break
+    fi
     sleep 0.2
 done
-if [ ! -S "/tmp/.X11-unix/X${DISPLAY#:}" ]; then
-    log "ERROR: Xvfb did not come up; see /tmp/xvfb.log"
+if [ -z "$xvfb_up" ]; then
+    log "ERROR: Xvfb did not come up on ${DISPLAY}; see /tmp/xvfb.log"
     tail -n 20 /tmp/xvfb.log
     exit 1
 fi
+log "X display ready: $(xdotool getdisplaygeometry 2>/dev/null)"
 
 log "starting x11vnc on port 5900"
 x11vnc -display "$DISPLAY" -forever -shared -nopw -noxdamage -quiet -rfbport 5900 >/tmp/x11vnc.log 2>&1 &
