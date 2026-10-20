@@ -1,0 +1,96 @@
+# Base44 sandbox environment for the Disaster Management with HealthCare application.
+#
+# What the app is: a Java 17 Swing desktop program (NetBeans/Ant project) that stores
+# everything in MySQL, connecting to a hardcoded jdbc:mysql://localhost:3306/hms.
+#
+# How it is served: a Swing window cannot be rendered by a browser, so the `app`
+# service runs a virtual X display with a VNC server and publishes it as a web page
+# (noVNC) on host port 3000 - the port the Base44 preview shows.
+#
+# Development flow: no application image is used and no source is baked into an image.
+# The repository is bind-mounted and the Java sources are compiled inside the container
+# at every start, so `docker compose -f docker-compose.base44.yml restart app` is enough
+# to pick up code changes.
+services:
+  db:
+    image: mysql:8.0
+    # mysql_native_password: the app connects without TLS / without
+    # allowPublicKeyRetrieval, which caching_sha2_password would reject.
+    # lower_case_table_names=1: the app's queries do not always match the table
+    # naming in the dumps (e.g. "select * from Volunteers" for table `volunteers`),
+    # which only worked on the case-insensitive MySQL the project was written against.
+    # Must be set when the data directory is initialized.
+    command: --default-authentication-plugin=mysql_native_password --character-set-server=utf8mb4 --lower-case-table-names=1
+    environment:
+      # The password the application hardcodes (Model/Directoryinti.java and friends).
+      MYSQL_ROOT_PASSWORD: "Rama@$$111517105089"
+      # The app reaches MySQL through a socat relay, so it is not a "local" client.
+      MYSQL_ROOT_HOST: "%"
+      MYSQL_DATABASE: hms
+    volumes:
+      - db_data:/var/lib/mysql
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          'MYSQL_PWD="$$MYSQL_ROOT_PASSWORD" mysqladmin ping -h 127.0.0.1 -u root --silent',
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 30s
+    restart: on-failure
+
+  # One-shot schema + seed load from the per-table SQL dumps committed in the repo.
+  # Every dump file drops and recreates its table, so re-running is safe.
+  db-init:
+    image: mysql:8.0
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      MYSQL_PWD: "Rama@$$111517105089"
+    volumes:
+      - ./Dependencies/Dump20240519:/dump:ro
+    entrypoint: ["/bin/sh", "-ec"]
+    command:
+      - |
+        for f in /dump/*.sql; do
+          echo "importing $$f"
+          mysql --init-command="SET FOREIGN_KEY_CHECKS=0" -h db -u root hms < "$$f"
+        done
+        echo "loaded $$(ls /dump/*.sql | wc -l) table dumps into database hms"
+    restart: "no"
+
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile.base44
+    working_dir: /workspace/Disaster-Management-with-HealthCare-finalproject
+    depends_on:
+      db:
+        condition: service_healthy
+      db-init:
+        condition: service_completed_successfully
+    environment:
+      # Sandbox flag passed through from the platform; unused by this app.
+      - BASE44_PREVIEW_MODE
+      # Consumed by scripts/base44-dev-entrypoint.sh.
+      - APP_DIR=/workspace/Disaster-Management-with-HealthCare-finalproject
+      - LIB_DIR=/workspace/Dependencies
+      - DB_HOST=db
+      - DISPLAY=:99
+    volumes:
+      - ./:/workspace
+    ports:
+      - "3000:3000"
+    healthcheck:
+      test: ["CMD-SHELL", "/bin/sh /workspace/scripts/base44-healthcheck.sh"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 120s
+    restart: on-failure
+
+volumes:
+  db_data:

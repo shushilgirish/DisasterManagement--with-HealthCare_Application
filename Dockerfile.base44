@@ -1,0 +1,34 @@
+# Runtime image for the Base44 sandbox.
+#
+# The application itself is NOT baked in here: the repository is bind-mounted at
+# /workspace and compiled from source by scripts/base44-dev-entrypoint.sh, so edits
+# in the repo are picked up by restarting the service.
+#
+# The extra packages exist because this is a Java Swing (desktop) program: it needs
+# an X display, and we expose that display to the browser preview via VNC + noVNC.
+FROM eclipse-temurin:17-jdk-jammy
+
+RUN apt-get update \
+ && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+      xvfb \
+      x11vnc \
+      novnc \
+      websockify \
+      socat \
+      xdotool \
+      procps \
+      curl \
+      ca-certificates \
+      fontconfig \
+      fonts-dejavu-core \
+      libxext6 \
+      libxrender1 \
+      libxtst6 \
+      libxi6 \
+      libxfixes3 \
+ && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /workspace/Disaster-Management-with-HealthCare-finalproject
+
+# Default to the same live-reload-style dev flow used by docker-compose.base44.yml.
+ENTRYPOINT ["/bin/sh", "/workspace/scripts/base44-dev-entrypoint.sh"]
